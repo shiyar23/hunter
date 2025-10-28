@@ -238,7 +238,7 @@ def generate_and_send_setup(user_id, chat_id):
         body = {'values': values}
         result = sheets_service.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID,
-            range='Sheet1!A:K',
+            range='Sheet1!A:I',
             valueInputOption='RAW',
             insertDataOption='INSERT_ROWS',
             body=body
