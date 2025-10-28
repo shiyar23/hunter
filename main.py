@@ -4,6 +4,7 @@ import telebot
 import logging
 import random
 import json
+import time
 from telebot import types
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
@@ -19,11 +20,21 @@ logger = logging.getLogger(__name__)
 # === Environment Variables ===
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
-SERVICE_ACCOUNT_FILE = os.getenv('SERVICE_ACCOUNT_FILE', 'service_account.json')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
-if not BOT_TOKEN or not SPREADSHEET_ID:
-    logger.error("BOT_TOKEN و SPREADSHEET_ID مطلوبان في متغيرات البيئة!")
+# === تأكد من وجود المتغيرات الأساسية ===
+if not BOT_TOKEN:
+    logger.error("BOT_TOKEN مطلوب!")
     exit(1)
+if not SPREADSHEET_ID:
+    logger.error("SPREADSHEET_ID مطلوب!")
+    exit(1)
+if not GOOGLE_CREDENTIALS:
+    logger.error("GOOGLE_CREDENTIALS مطلوب كـ JSON!")
+    exit(1)
+
+# === طباعة تأكيد القراءة ===
+logger.info("جميع المتغيرات تم تحميلها بنجاح!")
 
 # === Bot ===
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='Markdown')
@@ -31,20 +42,11 @@ bot = telebot.TeleBot(BOT_TOKEN, parse_mode='Markdown')
 # === Google Sheets Service ===
 def get_sheets_service():
     try:
-        if os.path.exists(SERVICE_ACCOUNT_FILE):
-            credentials = service_account.Credentials.from_service_account_file(
-                SERVICE_ACCOUNT_FILE,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
-        else:
-            creds_json = os.getenv('GOOGLE_CREDENTIALS')
-            if not creds_json:
-                raise ValueError("GOOGLE_CREDENTIALS أو service_account.json مطلوب!")
-            creds_info = json.loads(creds_json)
-            credentials = service_account.Credentials.from_service_account_info(
-                creds_info,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
+        creds_info = json.loads(GOOGLE_CREDENTIALS)
+        credentials = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=['https://www.googleapis.com/auth/spreadsheets']
+        )
         return build('sheets', 'v4', credentials=credentials)
     except Exception as e:
         logger.error(f"خطأ في Google Sheets: {str(e)}")
@@ -212,7 +214,7 @@ def generate_and_send_setup(user_id, chat_id):
         logger.error(f"خطأ Google Sheets: {str(e)}")
         send_and_save_message(chat_id, f"*خطأ في حفظ البيانات:* `{str(e)}`", main_menu_keyboard(), user_id)
 
-# === باقي الأوامر (بدء جديد، حذف، إلخ) ===
+# === باقي الأوامر ===
 @bot.message_handler(func=lambda m: m.text == 'بدء جديد')
 def new_setup(message):
     user_id = message.from_user.id
@@ -253,11 +255,11 @@ def webhook():
 def home():
     return "Trading Bot يعمل! استخدم Telegram."
 
-# === Set Webhook ===
+# === Set Webhook (Railway) ===
 def set_webhook():
-    domain = os.getenv('RENDER_EXTERNAL_HOSTNAME') or os.getenv('HOSTNAME') or os.getenv('DOMAIN')
+    domain = os.getenv('RAILWAY_STATIC_URL') or os.getenv('RENDER_EXTERNAL_HOSTNAME') or os.getenv('HOSTNAME')
     if not domain:
-        logger.warning("لم يتم تعيين DOMAIN أو RENDER_EXTERNAL_HOSTNAME")
+        logger.warning("لم يتم العثور على الدومين، سيتم استخدام polling محليًا.")
         return
     url = f"https://{domain}/webhook"
     try:
@@ -270,10 +272,9 @@ def set_webhook():
 
 # === Run ===
 if __name__ == "__main__":
-    import time
-    time.sleep(2)
     set_webhook()
     port = int(os.getenv('PORT', 5000))
+    logger.info(f"البوت يعمل على المنفذ {port}")
     app.run(host='0.0.0.0', port=port)
 else:
     set_webhook()
