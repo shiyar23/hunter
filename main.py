@@ -8,10 +8,6 @@ import time
 from telebot import types
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
-from flask import Flask, request, abort
-
-# === Flask App ===
-app = Flask(__name__)
 
 # === Logging ===
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -22,7 +18,7 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
-# === تأكد من وجود المتغيرات الأساسية ===
+# === تحقق من المتغيرات ===
 if not BOT_TOKEN:
     logger.error("BOT_TOKEN مطلوب!")
     exit(1)
@@ -33,7 +29,6 @@ if not GOOGLE_CREDENTIALS:
     logger.error("GOOGLE_CREDENTIALS مطلوب كـ JSON!")
     exit(1)
 
-# === طباعة تأكيد القراءة ===
 logger.info("جميع المتغيرات تم تحميلها بنجاح!")
 
 # === Bot ===
@@ -242,39 +237,12 @@ def clean_chat(message):
     except: pass
     send_and_save_message(chat_id, "*تم تنظيف الدردشة!*\nمرحباً!", main_menu_keyboard(), user_id)
 
-# === Webhook Route ===
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        update = telebot.types.Update.de_json(request.get_data().decode('utf-8'))
-        bot.process_new_updates([update])
-        return '', 200
-    abort(403)
-
-@app.route('/')
-def home():
-    return "Trading Bot يعمل! استخدم Telegram."
-
-# === Set Webhook (Railway) ===
-def set_webhook():
-    domain = os.getenv('RAILWAY_STATIC_URL') or os.getenv('RENDER_EXTERNAL_HOSTNAME') or os.getenv('HOSTNAME')
-    if not domain:
-        logger.warning("لم يتم العثور على الدومين، سيتم استخدام polling محليًا.")
-        return
-    url = f"https://{domain}/webhook"
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=url)
-        logger.info(f"Webhook معيّن: {url}")
-    except Exception as e:
-        logger.error(f"فشل تعيين Webhook: {e}")
-
-# === Run ===
+# === تشغيل البوت بـ Polling (بدون Flask أو Webhook) ===
 if __name__ == "__main__":
-    set_webhook()
-    port = int(os.getenv('PORT', 5000))
-    logger.info(f"البوت يعمل على المنفذ {port}")
-    app.run(host='0.0.0.0', port=port)
-else:
-    set_webhook()
+    logger.info("البوت يعمل الآن باستخدام Polling...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            logger.error(f"خطأ في Polling: {e}")
+            time.sleep(5)
