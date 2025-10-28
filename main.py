@@ -5,6 +5,7 @@ import logging
 import random
 import json
 import time
+import base64
 from telebot import types
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
@@ -16,7 +17,8 @@ logger = logging.getLogger(__name__)
 # === Environment Variables ===
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
-GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
+GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')  # JSON string (raw or base64)
+CHANNEL_USERNAME = os.getenv('CHANNEL_USERNAME')      # مثل: @yourchannel
 
 # === تحقق من المتغيرات ===
 if not BOT_TOKEN:
@@ -26,7 +28,7 @@ if not SPREADSHEET_ID:
     logger.error("SPREADSHEET_ID مطلوب!")
     exit(1)
 if not GOOGLE_CREDENTIALS:
-    logger.error("GOOGLE_CREDENTIALS مطلوب كـ JSON!")
+    logger.error("GOOGLE_CREDENTIALS مطلوب!")
     exit(1)
 
 logger.info("جميع المتغيرات تم تحميلها بنجاح!")
@@ -34,15 +36,31 @@ logger.info("جميع المتغيرات تم تحميلها بنجاح!")
 # === Bot ===
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode='Markdown')
 
-# === Google Sheets Service ===
+# === Google Sheets Service (محسّنة) ===
 def get_sheets_service():
     try:
-        creds_info = json.loads(GOOGLE_CREDENTIALS)
+        creds_str = GOOGLE_CREDENTIALS.strip()
+
+        # إذا كان Base64 (طويل ولا يبدأ بـ {)
+        if len(creds_str) > 500 and not creds_str.startswith('{'):
+            try:
+                creds_str = base64.b64decode(creds_str).decode('utf-8')
+                logger.info("تم فك تشفير Base64 بنجاح")
+            except Exception as e:
+                logger.error(f"فشل فك تشفير Base64: {e}")
+                raise ValueError("Base64 غير صالح في GOOGLE_CREDENTIALS")
+
+        # تحويل JSON
+        creds_info = json.loads(creds_str)
+
         credentials = service_account.Credentials.from_service_account_info(
             creds_info,
             scopes=['https://www.googleapis.com/auth/spreadsheets']
         )
-        return build('sheets', 'v4', credentials=credentials)
+        service = build('sheets', 'v4', credentials=credentials)
+        logger.info("تم إنشاء خدمة Google Sheets بنجاح")
+        return service
+
     except Exception as e:
         logger.error(f"خطأ في Google Sheets: {str(e)}")
         raise
@@ -84,7 +102,7 @@ def send_and_save_message(chat_id, text, reply_markup=None, user_id=None):
     if reply_markup is None:
         reply_markup = types.ReplyKeyboardRemove()
     try:
-        msg = bot.send_message(chat_id, text, reply_markup=reply_markup)
+        msg = bot.send_message(chat_id, text, reply_markup=reply_markup, disable_web_page_preview=True)
         if user_id and user_id in user_data:
             user_data[user_id].setdefault('bot_messages', []).append(msg.message_id)
         return msg
@@ -98,7 +116,7 @@ def start(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_data[user_id] = {'bot_messages': []}
-    text = ("*مرحباً بك في ORORA Trading Setup Generator*\n\n"
+    text = ("*مرحباً بك في Trading Setup Generator*\n\n"
             "بوت احترافي لتوليد إعدادات تداول دقيقة ومخصصة للعملات والذهب.\n\n"
             "*ابدأ الآن*: اضغط على زر رمز للاختيار.")
     send_and_save_message(chat_id, text, main_menu_keyboard(), user_id)
@@ -121,7 +139,7 @@ def process_trade_type(message):
         bot.register_next_step_handler(message, process_trade_type)
         return
     user_data[user_id]['trade_type'] = trade_type
-    send_and_save_message(chat_id, f"*تم اختيار {trade_type}*\n\nأدخل سعر الدخول (✅Entry Price):", types.ReplyKeyboardRemove(), user_id)
+    send_and_save_message(chat_id, f"*تم اختيار {trade_type}*\n\nأدخل سعر الدخول (Entry Price):", types.ReplyKeyboardRemove(), user_id)
     bot.register_next_step_handler(message, process_entry_price)
 
 def process_entry_price(message):
@@ -129,7 +147,7 @@ def process_entry_price(message):
     chat_id = message.chat.id
     try:
         user_data[user_id]['entry_price'] = float(message.text)
-        send_and_save_message(chat_id, "أدخل سعر وقف الخسارة (❌Stop Loss):", types.ReplyKeyboardRemove(), user_id)
+        send_and_save_message(chat_id, "أدخل سعر وقف الخسارة (Stop Loss):", types.ReplyKeyboardRemove(), user_id)
         bot.register_next_step_handler(message, process_stop_loss)
     except ValueError:
         send_and_save_message(chat_id, "*سعر دخول غير صحيح. أعد الإدخال:*", types.ReplyKeyboardRemove(), user_id)
@@ -145,6 +163,7 @@ def process_stop_loss(message):
         send_and_save_message(chat_id, "*سعر وقف الخسارة غير صحيح. أعد الإدخال:*", types.ReplyKeyboardRemove(), user_id)
         bot.register_next_step_handler(message, process_stop_loss)
 
+# === الدالة الرئيسية: إنشاء + إرسال + حفظ + نشر ===
 def generate_and_send_setup(user_id, chat_id):
     data = user_data[user_id]
     commodity = data['commodity']
@@ -155,6 +174,7 @@ def generate_and_send_setup(user_id, chat_id):
     pip_size = pip_sizes.get(commodity, 0.0001)
     decimals = price_decimals.get(commodity, 5)
 
+    # حساب TP
     if commodity == 'XAUUSD':
         gaps_list = [50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 200, 220, 250]
         selected_gaps = random.sample(gaps_list, 5)
@@ -170,44 +190,67 @@ def generate_and_send_setup(user_id, chat_id):
         tp_units = sorted([int(u + random.uniform(-5, 5)) for u in base_units])
         swing_unit = random.randint(550, 750)
 
-    output = f"*Setup {commodity} {trade_type}*\n"
-    output += f"Entry: `{entry_price:.{decimals}f}`\n"
-    output += f"Stop Loss: `{stop_loss:.{decimals}f}` (High Risk)\n\n"
-
+    # إنشاء الرسالة
     tp_prices = []
+    output = f"*Setup {commodity} {trade_type}*\n\n"
+    output += f"*Entry:* `{entry_price:.{decimals}f}`\n"
+    output += f"*SL:* `{stop_loss:.{decimals}f}` _(High Risk)_\n\n"
+
     for i, unit in enumerate(tp_units, 1):
         tp_price = entry_price + (unit * pip_size * direction)
         tp_prices.append(tp_price)
-        output += f"TP{i}: `{tp_price:.{decimals}f}` — pips: `{unit}`\n"
+        output += f"*TP{i}:* `{tp_price:.{decimals}f}` — `{unit}` pips\n"
 
     swing_tp_price = entry_price + (swing_unit * pip_size * direction)
-    output += f"Swing TP: `{swing_tp_price:.{decimals}f}` — pips: `{swing_unit}`\n\n"
-    output += "⚠️ إخلاء مسؤولية: هذا ليس نصيحة مالية. استخدم دائمًا إدارة مخاطر مناسبة واتخذ قراراتك بناءً على استراتيجيتك الخاصة.."
+    output += f"\n*Swing TP:* `{swing_tp_price:.{decimals}f}` — `{swing_unit}` pips\n"
+    output += f"\n⚠️ _ليس نصيحة مالية. التداول محفوف بالمخاطر._"
 
+    # إرسال للمستخدم
     send_and_save_message(chat_id, output, main_menu_keyboard(), user_id)
 
-    # === Save to Google Sheets ===
+    # نشر في القناة
+    if CHANNEL_USERNAME:
+        try:
+            channel_msg = f"*صفقة جديدة - {commodity} {trade_type}*\n\n" + output
+            bot.send_message(
+                chat_id=CHANNEL_USERNAME,
+                text=channel_msg,
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+            logger.info(f"تم النشر في القناة: {CHANNEL_USERNAME}")
+        except Exception as e:
+            logger.error(f"فشل النشر في القناة: {e}")
+
+    # === حفظ في Google Sheets ===
     try:
         sheets_service = get_sheets_service()
         values = [[
+            time.strftime("%Y-%m-%d %H:%M:%S"),
             commodity, trade_type, entry_price, stop_loss,
             tp_prices[0] if len(tp_prices) > 0 else '',
             tp_prices[1] if len(tp_prices) > 1 else '',
             tp_prices[2] if len(tp_prices) > 2 else '',
             tp_prices[3] if len(tp_prices) > 3 else '',
+            tp_prices[4] if len(tp_prices) > 4 else '',
             swing_tp_price
         ]]
         body = {'values': values}
-        sheets_service.spreadsheets().values().append(
+        result = sheets_service.spreadsheets().values().append(
             spreadsheetId=SPREADSHEET_ID,
-            range='Sheet1!A:I',
+            range='Sheet1!A:K',
             valueInputOption='RAW',
+            insertDataOption='INSERT_ROWS',
             body=body
         ).execute()
-        send_and_save_message(chat_id, f"*تم حفظ الإعداد في Google Sheets!*\n[رابط الجدول](https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit)", user_id=user_id)
+        logger.info(f"تم حفظ الإعداد في Google Sheets: {result.get('updates')}")
+
+        sheet_link = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit"
+        send_and_save_message(chat_id, f"*تم حفظ الإعداد في Google Sheets!*\n[فتح الجدول]({sheet_link})", user_id=user_id)
+
     except Exception as e:
-        logger.error(f"خطأ Google Sheets: {str(e)}")
-        send_and_save_message(chat_id, f"*خطأ في حفظ البيانات:* `{str(e)}`", main_menu_keyboard(), user_id)
+        logger.error(f"خطأ في حفظ Google Sheets: {str(e)}")
+        send_and_save_message(chat_id, f"*فشل الحفظ في Google Sheets:*\n`{str(e)}`", main_menu_keyboard(), user_id)
 
 # === باقي الأوامر ===
 @bot.message_handler(func=lambda m: m.text == 'بدء جديد')
@@ -237,7 +280,7 @@ def clean_chat(message):
     except: pass
     send_and_save_message(chat_id, "*تم تنظيف الدردشة!*\nمرحباً!", main_menu_keyboard(), user_id)
 
-# === تشغيل البوت بـ Polling (بدون Flask أو Webhook) ===
+# === تشغيل البوت ===
 if __name__ == "__main__":
     logger.info("البوت يعمل الآن باستخدام Polling...")
     while True:
