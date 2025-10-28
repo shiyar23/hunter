@@ -98,7 +98,7 @@ def start(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_data[user_id] = {'bot_messages': []}
-    text = ("*مرحباً بك في Trading Setup Generator*\n\n"
+    text = ("*مرحباً بك في ORORA Trading Setup Generator*\n\n"
             "بوت احترافي لتوليد إعدادات تداول دقيقة ومخصصة للعملات والذهب.\n\n"
             "*ابدأ الآن*: اضغط على زر رمز للاختيار.")
     send_and_save_message(chat_id, text, main_menu_keyboard(), user_id)
@@ -121,7 +121,7 @@ def process_trade_type(message):
         bot.register_next_step_handler(message, process_trade_type)
         return
     user_data[user_id]['trade_type'] = trade_type
-    send_and_save_message(chat_id, f"*تم اختيار {trade_type}*\n\nأدخل سعر الدخول (Entry Price):", types.ReplyKeyboardRemove(), user_id)
+    send_and_save_message(chat_id, f"*تم اختيار {trade_type}*\n\nأدخل سعر الدخول (✅Entry Price):", types.ReplyKeyboardRemove(), user_id)
     bot.register_next_step_handler(message, process_entry_price)
 
 def process_entry_price(message):
@@ -129,7 +129,7 @@ def process_entry_price(message):
     chat_id = message.chat.id
     try:
         user_data[user_id]['entry_price'] = float(message.text)
-        send_and_save_message(chat_id, "أدخل سعر وقف الخسارة (Stop Loss):", types.ReplyKeyboardRemove(), user_id)
+        send_and_save_message(chat_id, "أدخل سعر وقف الخسارة (❌Stop Loss):", types.ReplyKeyboardRemove(), user_id)
         bot.register_next_step_handler(message, process_stop_loss)
     except ValueError:
         send_and_save_message(chat_id, "*سعر دخول غير صحيح. أعد الإدخال:*", types.ReplyKeyboardRemove(), user_id)
@@ -182,7 +182,7 @@ def generate_and_send_setup(user_id, chat_id):
 
     swing_tp_price = entry_price + (swing_unit * pip_size * direction)
     output += f"Swing TP: `{swing_tp_price:.{decimals}f}` — pips: `{swing_unit}`\n\n"
-    output += "*إخلاء مسؤولية*: هذا ليس نصيحة مالية."
+    output += "⚠️ إخلاء مسؤولية: هذا ليس نصيحة مالية. استخدم دائمًا إدارة مخاطر مناسبة واتخذ قراراتك بناءً على استراتيجيتك الخاصة.."
 
     send_and_save_message(chat_id, output, main_menu_keyboard(), user_id)
 
